@@ -32,38 +32,46 @@ import de.roderick.weberknecht.WebSocketMessage;
 
 class PusherConnection {
 	private static final String LOG_TAG = "Pusher";
-
+	
 	public Pusher mPusher;
 	public WebSocket mWebSocket;
-
+	public PusherConnectionListener mListener;
+	
 	public PusherConnection(Pusher pusher) {
 		mPusher = pusher;
 	}
-
+	
 	public void connect() {
 		try {
 			URI url = new URI(mPusher.getUrl());
 			Log.d(LOG_TAG, "Connecting to " + url.toString());
-
+			
 			mWebSocket = new WebSocketConnection(url);
 			mWebSocket.setEventHandler(new WebSocketEventHandler() {
 				public void onOpen() {
 					Log.d(LOG_TAG, "Successfully opened Websocket");
+					if (mListener != null) {
+						mListener.onInitialized();
+					}
 				}
-
+				
 				public void onMessage(WebSocketMessage message) {
 					Log.d(LOG_TAG, "Received from Websocket " + message.getText());
-
+					
 					try {
 						JSONObject parsed = new JSONObject(message.getText());
 						String eventName = parsed.getString("event");
 						String channelName = parsed.optString("channel", null);
 						String eventData = parsed.getString("data");
-
+						
 						if (eventName.equals(Pusher.PUSHER_EVENT_CONNECTION_ESTABLISHED)) {
 							JSONObject parsedEventData = new JSONObject(eventData);
 							String socketId = parsedEventData.getString("socket_id");
 							mPusher.onConnected(socketId);
+							
+							if (mListener != null) {
+								mListener.onConnected();
+							}
 						} else {
 							mPusher.dispatchEvents(eventName, eventData, channelName);
 						}
@@ -71,20 +79,34 @@ class PusherConnection {
 						e.printStackTrace();
 					}
 				}
-
+				
 				public void onClose() {
 					Log.d(LOG_TAG, "Successfully closed Websocket");
+					mPusher.onDisconnected();
+					
+					if (mListener != null) {
+						mListener.onDisconnected();
+					}
 				}
 			});
+			
 			mWebSocket.connect();
-
+			
 		} catch (URISyntaxException e) {
 			e.printStackTrace();
+			
+			if (mListener != null) {
+				mListener.onFailed();
+			}
 		} catch (WebSocketException e) {
 			e.printStackTrace();
+			
+			if (mListener != null) {
+				mListener.onFailed();
+			}
 		}
 	}
-
+	
 	public void disconnect() {
 		if (mWebSocket != null) {
 			try {
@@ -93,25 +115,24 @@ class PusherConnection {
 				e.printStackTrace();
 			}
 		}
-		mPusher.onDisconnected();
 	}
-
+	
 	public void send(String eventName, JSONObject eventData, String channelName) {
 		if (mWebSocket == null)
 			return;
-
+		
 		if (mWebSocket.isConnected()) {
 			try {
 				JSONObject message = new JSONObject();
 				message.put("event", eventName);
 				message.put("data", eventData);
-
+				
 				if (channelName != null) {
 					message.put("channel", channelName);
 				}
-
+				
 				mWebSocket.send(message.toString());
-
+				
 				Log.d(LOG_TAG, "sent message " + message.toString());
 			} catch (JSONException e) {
 				e.printStackTrace();
@@ -119,5 +140,9 @@ class PusherConnection {
 				e.printStackTrace();
 			}
 		}
+	}
+	
+	public void setConnectionListener(PusherConnectionListener listener) {
+		mListener = listener;
 	}
 }
